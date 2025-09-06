@@ -10,6 +10,7 @@ class AuthError(Exception):
     pass
 
 class AuthManager:
+    """Authentication manager for user login and session management."""
     def __init__(self):
         # Load users from JSON file or create default admin user
         self.users = {}  # username: dict with password_hash & roles
@@ -19,7 +20,8 @@ class AuthManager:
         
         self.load_users()
 
-    def load_users(self):
+    def load_users(self) -> None:
+        """Load users from JSON file or create default admin user."""
         if os.path.exists(USERS_FILE):
             try:
                 with open(USERS_FILE, "r") as f:
@@ -34,7 +36,8 @@ class AuthManager:
             self.add_user("admin", "admin123", roles=["admin"])
             self.save_users()
 
-    def save_users(self):
+    def save_users(self) -> None:
+        """Save users to JSON file."""
         try:
             with open(USERS_FILE, "w") as f:
                 json.dump({"users": self.users}, f, indent=4)
@@ -42,16 +45,18 @@ class AuthManager:
             print(f"Error saving users file: {e}")
 
     def hash_password(self, password: str) -> bytes:
-        # Generate bcrypt salt and hashed password
+        """Generate bcrypt salt and hashed password."""
         return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
     def check_password(self, password: str, hashed: bytes) -> bool:
+        """Check password against hashed value."""
         try:
             return bcrypt.checkpw(password.encode("utf-8"), hashed)
         except Exception:
             return False
 
-    def add_user(self, username: str, password: str, roles=None):
+    def add_user(self, username: str, password: str, roles=None) -> None:
+        """Add a new user with roles."""
         if roles is None:
             roles = ["staff"]  # default role
         if username in self.users:
@@ -60,14 +65,16 @@ class AuthManager:
         self.users[username] = {"password_hash": pwd_hash.decode("utf-8"), "roles": roles}
         self.save_users()
 
-    def update_password(self, username: str, new_password: str):
+    def update_password(self, username: str, new_password: str) -> None:
+        """Update password for a user."""
         if username not in self.users:
             raise AuthError(f"User '{username}' does not exist.")
         pwd_hash = self.hash_password(new_password)
         self.users[username]["password_hash"] = pwd_hash.decode("utf-8")
         self.save_users()
 
-    def delete_user(self, username: str):
+    def delete_user(self, username: str) -> None:
+        """Delete a user."""
         if username not in self.users:
             raise AuthError(f"User '{username}' does not exist.")
         if username == "admin":
@@ -76,6 +83,7 @@ class AuthManager:
         self.save_users()
 
     def login(self, username: str, password: str) -> bool:
+        """Login user and start session."""
         if username not in self.users:
             return False
         stored_hash = self.users[username]["password_hash"].encode("utf-8")
@@ -86,28 +94,34 @@ class AuthManager:
             return True
         return False
 
-    def logout(self):
+    def logout(self) -> None:
+        """Logout current user."""
         self.current_user = None
         self.current_role = None
         self.last_activity = None
 
     def is_logged_in(self) -> bool:
+        """Check if a user is logged in."""
         return self.current_user is not None
 
-    def get_current_user(self):
+    def get_current_user(self) -> str | None:
+        """Get current logged in user."""
         if not self.is_logged_in():
             return None
         return self.current_user
 
-    def get_user_roles(self, username: str):
+    def get_user_roles(self, username: str) -> list:
+        """Get roles for a user."""
         return self.users.get(username, {}).get("roles", [])
 
     def has_role(self, role: str) -> bool:
+        """Check if current user has a role."""
         if not self.is_logged_in():
             return False
         return role in self.current_role
 
     def check_session_timeout(self) -> bool:
+        """Check if session timed out and logout if needed."""
         if not self.is_logged_in():
             return False
         if (time.time() - self.last_activity) > SESSION_TIMEOUT_SECONDS:
@@ -118,6 +132,7 @@ class AuthManager:
 
     # Password rule checks (can be used during registration or password changes)
     def validate_password_rules(self, password: str) -> tuple[bool, str]:
+        """Validate password against security rules."""
         if len(password) < 8:
             return False, "Password must be at least 8 characters long."
         if not any(c.islower() for c in password):
