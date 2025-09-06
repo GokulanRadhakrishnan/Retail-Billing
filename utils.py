@@ -16,9 +16,8 @@ logging.basicConfig(
 
 FIN_YEAR_START_MONTH = 4  # April
 
-def get_financial_year(date=None):
-    """
-    Given a date, returns the financial year string in format 'YYYY-YYYY'.
+def get_financial_year(date=None) -> str:
+    """Given a date, returns the financial year string in format 'YYYY-YYYY'.
     Financial year starts from April.
     """
     if not date:
@@ -32,19 +31,20 @@ def get_financial_year(date=None):
         end = year + 1
     return f"{start}-{end}"
 
-def get_purchase_excel_filename(date=None):
+def get_purchase_excel_filename(date=None) -> str:
+    """Return purchase Excel filename for a given date."""
     fy = get_financial_year(date)
     return f"Purchase_{fy}.xlsx"
 
-def get_sales_excel_filename(date=None):
+def get_sales_excel_filename(date=None) -> str:
+    """Return sales Excel filename for a given date."""
     fy = get_financial_year(date)
     return f"Sales_{fy}.xlsx"
 
 # ------------ Excel Helper Functions ------------
 
-def ensure_excel_file_with_sheets(path, sheetnames_with_headers):
-    """
-    Ensure Excel file exists with specified sheets and headers.
+def ensure_excel_file_with_sheets(path: str, sheetnames_with_headers: dict) -> Workbook:
+    """Ensure Excel file exists with specified sheets and headers.
     `sheetnames_with_headers` is a dict of sheet_name: list_of_headers
     """
     dir_name = os.path.dirname(path)
@@ -90,31 +90,24 @@ def ensure_excel_file_with_sheets(path, sheetnames_with_headers):
 
 # ------------ Validation Functions ------------
 
-def is_valid_mobile_number(mobile):
-    """
-    Validates Indian mobile numbers (10 digits, starting with 6-9).
-    """
+def is_valid_mobile_number(mobile: str) -> bool:
+    """Validates Indian mobile numbers (10 digits, starting with 6-9)."""
     return bool(re.fullmatch(r'[6-9]\d{9}', mobile))
 
-def is_valid_aadhar_number(aadhar):
-    """
-    Validates Aadhar number (12 digit numeric).
-    """
+def is_valid_aadhar_number(aadhar: str) -> bool:
+    """Validates Aadhar number (12 digit numeric)."""
     return bool(re.fullmatch(r'\d{12}', aadhar))
 
-def is_valid_date_string(date_str, date_format="%d-%m-%Y"):
-    """
-    Validates that a string is a date in the provided format.
-    """
+def is_valid_date_string(date_str: str, date_format="%d-%m-%Y") -> bool:
+    """Validates that a string is a date in the provided format."""
     try:
         datetime.strptime(date_str, date_format)
         return True
     except ValueError:
         return False
 
-def parse_date_string(date_str, date_format="%d-%m-%Y"):
-    """
-    Parses a date string to a datetime object.
+def parse_date_string(date_str: str, date_format="%d-%m-%Y"):
+    """Parses a date string to a datetime object.
     Returns None if invalid.
     """
     try:
@@ -122,19 +115,15 @@ def parse_date_string(date_str, date_format="%d-%m-%Y"):
     except ValueError:
         return None
 
-def is_positive_number(value):
-    """
-    Checks if value can be converted to float and is > 0.
-    """
+def is_positive_number(value) -> bool:
+    """Checks if value can be converted to float and is > 0."""
     try:
         return float(value) > 0
     except (ValueError, TypeError):
         return False
 
-def is_non_negative_number(value):
-    """
-    Checks if value can be converted to float and is >= 0.
-    """
+def is_non_negative_number(value) -> bool:
+    """Checks if value can be converted to float and is >= 0."""
     try:
         return float(value) >= 0
     except (ValueError, TypeError):
@@ -142,9 +131,8 @@ def is_non_negative_number(value):
 
 # ------------ Autocomplete Helper ------------
 
-def autocomplete_suggestions(word, collection, case_sensitive=False, max_results=10):
-    """
-    Returns a list of autocomplete suggestions from 'collection' that start with 'word'.
+def autocomplete_suggestions(word: str, collection: list, case_sensitive=False, max_results=10) -> list:
+    """Returns a list of autocomplete suggestions from 'collection' that start with 'word'.
     Respects case sensitivity flag and limits results to 'max_results'.
     """
     if not case_sensitive:
@@ -157,34 +145,26 @@ def autocomplete_suggestions(word, collection, case_sensitive=False, max_results
 
 # ------------ Error Logging ------------
 
-def log_error(message, exc_info=False):
-    """
-    Logs an error message with optional stack trace.
-    """
+def log_error(message: str, exc_info=False) -> None:
+    """Logs an error message with optional stack trace."""
     logging.error(message, exc_info=exc_info)
 
-def log_info(message):
-    """
-    Logs an informational message.
-    """
+def log_info(message: str) -> None:
+    """Logs an informational message."""
     logging.info(message)
 
 # ------------ Utility Functions ------------
 
-def format_currency(amount, symbol='₹'):
-    """
-    Format float amount as currency string with Rupee symbol.
-    """
+def format_currency(amount, symbol='₹') -> str:
+    """Format float amount as currency string with Rupee symbol."""
     try:
         amt = float(amount)
         return f"{symbol}{amt:,.2f}"
     except (ValueError, TypeError):
         return f"{symbol}0.00"
 
-def safe_float(value, default=0.0):
-    """
-    Safely convert to float, with fallback default on failure.
-    """
+def safe_float(value, default=0.0) -> float:
+    """Safely convert to float, with fallback default on failure."""
     try:
         return float(value)
     except (ValueError, TypeError):
@@ -207,7 +187,8 @@ if __name__ == "__main__":
 
 CUSTOMER_DATA_FILE = "data/customer_data.xlsx"
 
-def ensure_customer_data_file():
+def ensure_customer_data_file() -> None:
+    """Ensure customer data Excel file exists with required sheets."""
     os.makedirs(os.path.dirname(CUSTOMER_DATA_FILE), exist_ok=True)
     if not os.path.exists(CUSTOMER_DATA_FILE):
         wb = Workbook()
@@ -229,7 +210,8 @@ def add_or_update_customer(
     entry_by: str,
     created_at: str,
     ws_cust,
-):
+) -> None:
+    """Add or update customer info in Excel sheet."""
     header = [cell.value for cell in ws_cust[1]]
     idx_name = header.index("Customer Name") + 1
     idx_mobile = header.index("Mobile") + 1
@@ -278,9 +260,8 @@ def update_customer_data_file(
     CUSTOMER_DATA_FILE: str,
     ensure_customer_data_file,
     add_or_update_customer,
-):
-    """
-    Updates customer_data.xlsx with customer info and purchase history.
+) -> None:
+    """Updates customer_data.xlsx with customer info and purchase history.
     Auto-fills missing customer fields if possible.
     Removes purchase history older than 3 years.
 
@@ -332,6 +313,25 @@ def update_customer_data_file(
         payment_mode, cash_amt, upi_amt, entry_by
     ])
 
+    # Remove purchase history older than 3 years
+    from datetime import timedelta
+    cutoff_date = datetime.now() - timedelta(days=3*365)
+    rows_to_delete = []
+    for row in ws_ph.iter_rows(min_row=2):
+        date_cell = row[1].value  # Date is second column in PurchaseHistory sheet
+        try:
+            dt = datetime.strptime(date_cell, "%d-%m-%Y")
+            if dt < cutoff_date:
+                rows_to_delete.append(row[0].row)
+        except Exception:
+            # If date invalid or missing, skip deletion for safety
+            continue
+
+    for r in reversed(rows_to_delete):
+        ws_ph.delete_rows(r)
+
+    # Save workbook
+    wb.save(CUSTOMER_DATA_FILE)
     # Remove purchase history older than 3 years
     from datetime import timedelta
     cutoff_date = datetime.now() - timedelta(days=3*365)
