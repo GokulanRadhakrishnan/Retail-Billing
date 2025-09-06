@@ -2,6 +2,7 @@ import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QInputDialog, QAction, QLineEdit
 )
+from PyQt5.QtCore import QTimer
 
 # Import your actual implemented modules here
 from auth import AuthManager
@@ -15,7 +16,8 @@ from reports import ReportsWidget
 from utils import get_financial_year  # Or your exact function for financial year calculation
 
 # Helper function to get dynamically the purchase Excel path for Sales widget
-def purchase_excel_path(qdate):
+def purchase_excel_path(qdate) -> str:
+    """Return purchase Excel path for given QDate."""
     # qdate is QDate instance, convert to Python datetime.date
     pydate = qdate.toPyDate()
     fy = get_financial_year(pydate)
@@ -24,6 +26,7 @@ def purchase_excel_path(qdate):
 
 
 class MainWindow(QMainWindow):
+    """Main application window with tabbed interface."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Sri Krishna Agro Centre - Retail Billing Software")
@@ -42,7 +45,14 @@ class MainWindow(QMainWindow):
         # Prompt login on start
         self._show_login_dialog()
 
-    def _create_menu(self):
+        # Session timeout timer (checks every 60 seconds)
+        self.session_timer = QTimer(self)
+        self.session_timer.setInterval(60_000)
+        self.session_timer.timeout.connect(self._on_session_timer)
+        self.session_timer.start()
+
+    def _create_menu(self) -> None:
+        """Create menu bar and actions."""
         menubar = self.menuBar()
 
         # File Menu
@@ -64,7 +74,8 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about_dialog)
         help_menu.addAction(about_action)
 
-    def _create_tabs(self):
+    def _create_tabs(self) -> None:
+        """Create tab widgets for main sections."""
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
@@ -87,7 +98,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.customer_tab, "Customer Menu")
         self.tabs.addTab(self.reports_tab, "Reports")
 
-    def _show_login_dialog(self):
+    def _show_login_dialog(self) -> None:
+        """Show login dialog for user authentication."""
         if self.auth_manager.current_user:
             QMessageBox.information(self, "Already Logged In",
                                     f"User '{self.auth_manager.current_user}' is already logged in.")
@@ -107,7 +119,8 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Login Failed", "Invalid username or password.")
 
-    def _update_ui_access(self):
+    def _update_ui_access(self) -> None:
+        """Update tab access based on login and role."""
         logged_in = self.auth_manager.current_user is not None
         is_admin = self.auth_manager.has_role("admin")
 
@@ -122,7 +135,8 @@ class MainWindow(QMainWindow):
         if not logged_in:
             QMessageBox.information(self, "Login Required", "Please login to access application features.")
 
-    def _logout(self):
+    def _logout(self) -> None:
+        """Logout current user."""
         if not self.auth_manager.current_user:
             QMessageBox.information(self, "Logout", "No user is currently logged in.")
             return
@@ -136,17 +150,26 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Logged Out", f"User '{user}' logged out successfully.")
             self._update_ui_access()
 
-    def _show_about_dialog(self):
+    def _show_about_dialog(self) -> None:
+        """Show about dialog."""
         QMessageBox.information(
             self,
-            "About Sri Krishna Agro Centre Software",
-            "Retail Billing Software for Sri Krishna Agro Centre\n"
+            "About Your company Software",
+            "Retail Billing Software for Your company\n"
             "Built with PyQt5\n"
             "Version 1.0\n"
-            "© 2025 Sri Krishna Agro Centre"
+            "© 2025 Gokulan"
         )
 
-    def closeEvent(self, event):
+    def _on_session_timer(self) -> None:
+        """Handle session timeout."""
+        # If session timed out, AuthManager.logout() is called inside check_session_timeout
+        if self.auth_manager.check_session_timeout():
+            QMessageBox.information(self, "Session Timeout", "You have been logged out due to inactivity.")
+            self._update_ui_access()
+
+    def closeEvent(self, event) -> None:
+        """Handle window close event."""
         reply = QMessageBox.question(
             self,
             'Exit Application',
@@ -160,7 +183,8 @@ class MainWindow(QMainWindow):
             event.ignore()
 
 
-def main():
+def main() -> None:
+    """Main entry point for application."""
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
