@@ -11,11 +11,13 @@ from utils import update_customer_data_file, ensure_customer_data_file, add_or_u
 CUSTOMER_FILE_DIR = "data"
 LOYALTY_PER_RS = 100  # 1 point per 100Rs spent
 
-def sales_excel_path(date: QDate):
+def sales_excel_path(date: QDate) -> str:
+    """Return sales Excel file path for a given QDate."""
     year = date.year() if date.month() >= 4 else date.year() - 1
     return os.path.join(CUSTOMER_FILE_DIR, f"Sales_{year}-{year+1}.xlsx")
 
 class CustomerWidget(QWidget):
+    """Widget for customer lookup and loyalty management."""
     def __init__(self, auth_manager=None, parent=None):
         super().__init__(parent)
         self.auth_manager = auth_manager
@@ -24,7 +26,8 @@ class CustomerWidget(QWidget):
         self.sales_file = sales_excel_path(QDate.currentDate())
         self.build_ui()
 
-    def build_ui(self):
+    def build_ui(self) -> None:
+        """Build the UI components."""
         form_group = QGroupBox("Customer Lookup")
         form_layout = QHBoxLayout()
         form_group.setLayout(form_layout)
@@ -78,7 +81,8 @@ class CustomerWidget(QWidget):
         hist_layout.addWidget(self.hist_table)
         self.layout().addWidget(hist_group)
 
-    def handle_search(self):
+    def handle_search(self) -> None:
+        """Handle customer search by mobile number."""
         mobile = self.mobile_input.text().strip()
         if not mobile:
             QMessageBox.warning(self, "Input Error", "Enter a mobile number.")
@@ -88,7 +92,8 @@ class CustomerWidget(QWidget):
         self.refresh_customer_info()
         self.refresh_purchase_history()
 
-    def clear_fields(self):
+    def clear_fields(self) -> None:
+        """Clear all input and display fields."""
         self.mobile_input.clear()
         self.details_text.clear()
         self.points_label.setText("Loyalty Points: 0")
@@ -97,7 +102,8 @@ class CustomerWidget(QWidget):
         self.hist_table.setRowCount(0)
         self.current_mobile = ""
 
-    def refresh_customer_info(self):
+    def refresh_customer_info(self) -> None:
+        """Refresh customer info display from Excel."""
         if not os.path.exists(CUSTOMER_DATA_FILE):
             self.details_text.setText("Customer data file missing.")
             self.points_label.setText("Loyalty Points: 0")
@@ -123,7 +129,8 @@ class CustomerWidget(QWidget):
             self.details_text.setText(f"Error loading customer info: {e}")
             self.points_label.setText("Loyalty Points: 0")
             
-    def refresh_purchase_history(self):
+    def refresh_purchase_history(self) -> None:
+        """Refresh purchase history table from Excel."""
         self.hist_table.setRowCount(0)
         if not os.path.exists(CUSTOMER_DATA_FILE):
            return
@@ -158,7 +165,8 @@ class CustomerWidget(QWidget):
         except Exception:
           pass
 
-    def read_loyalty_points(self):
+    def read_loyalty_points(self) -> int:
+        """Read loyalty points for current mobile from Excel."""
         # Optionally, store a loyalty_points.xlsx per financial year.
         points_file = os.path.join(CUSTOMER_FILE_DIR, "loyalty_points.xlsx")
         if not os.path.exists(points_file):
@@ -174,7 +182,8 @@ class CustomerWidget(QWidget):
             pass
         return 0
 
-    def write_loyalty_points(self, new_points, reason):
+    def write_loyalty_points(self, new_points: int, reason: str) -> None:
+        """Write loyalty points for current mobile to Excel."""
         points_file = os.path.join(CUSTOMER_FILE_DIR, "loyalty_points.xlsx")
         os.makedirs(CUSTOMER_FILE_DIR, exist_ok=True)
         if os.path.exists(points_file):
@@ -201,7 +210,8 @@ class CustomerWidget(QWidget):
             ])
         wb.save(points_file)
 
-    def adjust_points(self, mode):
+    def adjust_points(self, mode: str) -> None:
+        """Adjust loyalty points (add/redeem) for customer."""
         if not self.current_mobile:
             QMessageBox.warning(self, "No Customer", "Enter and search for a customer first.")
             return
