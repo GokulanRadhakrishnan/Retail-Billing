@@ -3,7 +3,7 @@ import sqlite3
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox,
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QGroupBox,
-    QListWidget, QAbstractItemView, QSplitter, QFormLayout
+    QListWidget, QAbstractItemView, QSplitter, QFormLayout, QCompleter
 )
 from PyQt5.QtCore import Qt, QDate, QEvent
 from openpyxl import Workbook, load_workbook
@@ -13,12 +13,64 @@ PURCHASE_FILE_DIR = "data"
 UNIT_OPTIONS = ["g", "kg", "ml", "l", "pcs", "bag"]
 GST_OPTIONS = ["NIL", "0", "5", "12", "18", "28"]
 CATEGORY_OPTIONS = ["Seeds", "Pesticide", "Fertilizer"]
-SQLITE_DB_PATH_PURCHASE = "data/purchase_data.db"  # Adjust if needed
+SQLITE_DB_PATH_PURCHASE = "purchases.db"  # Use the same DB as the rest of this module
 
 DB_FILE = "purchases.db"
+INV_DB_PATH = "data/sales_data.db"
 
-def init_db():
-    """Initialize SQLite DB and table if not exists"""
+def ensure_inventory_db() -> None:
+    """Ensure inventory DB and table exist."""
+    try:
+        os.makedirs(os.path.dirname(INV_DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(INV_DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS purchase_stock (
+                   product_name TEXT PRIMARY KEY,
+                   quantity REAL
+               )'''
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"WARNING: ensure_inventory_db failed: {e}")
+
+def inventory_add(product_name: str, qty: float) -> None:
+    """Add quantity to inventory for a product."""
+    ensure_inventory_db()
+    try:
+        conn = sqlite3.connect(INV_DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT quantity FROM purchase_stock WHERE product_name=?", (product_name,))
+        row = c.fetchone()
+        if row:
+            new_qty = float(row[0] or 0) + float(qty or 0)
+            c.execute("UPDATE purchase_stock SET quantity=? WHERE product_name=?", (new_qty, product_name))
+        else:
+            c.execute("INSERT INTO purchase_stock(product_name, quantity) VALUES (?, ?)", (product_name, float(qty or 0)))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"WARNING: inventory_add failed: {e}")
+
+def inventory_subtract(product_name: str, qty: float) -> None:
+    """Subtract quantity from inventory for a product."""
+    ensure_inventory_db()
+    try:
+        conn = sqlite3.connect(INV_DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT quantity FROM purchase_stock WHERE product_name=?", (product_name,))
+        row = c.fetchone()
+        if row:
+            new_qty = max(0.0, float(row[0] or 0) - float(qty or 0))
+            c.execute("UPDATE purchase_stock SET quantity=? WHERE product_name=?", (new_qty, product_name))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"WARNING: inventory_subtract failed: {e}")
+
+def init_db() -> None:
+    """Initialize SQLite DB and table if not exists."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''
@@ -40,8 +92,8 @@ def init_db():
     conn.commit()
     conn.close()
 
-def insert_purchase(purchase_tuple):
-    """Insert or replace purchase record into SQLite"""
+def insert_purchase(purchase_tuple: tuple) -> None:
+    """Insert or replace purchase record into SQLite."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''
@@ -52,7 +104,7 @@ def insert_purchase(purchase_tuple):
     conn.commit()
     conn.close()
 
-def delete_invoice_from_db(invoice_no):
+def delete_invoice_from_db(invoice_no: str) -> None:
     """Delete all records of an invoice from SQLite"""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -61,7 +113,8 @@ def delete_invoice_from_db(invoice_no):
     conn.close()
 
 
-def financial_year_for_date(date: QDate):
+def financial_year_for_date(date: QDate) -> str:
+    """Return financial year string for a given QDate."""
     month = date.month()
     year = date.year()
     if month >= 4:
@@ -70,20 +123,16 @@ def financial_year_for_date(date: QDate):
         return f"{year-1}-{year}"
 
 
-def purchase_excel_path(date: QDate):
+def purchase_excel_path(date: QDate) -> str:
+    """Return purchase Excel file path for a given QDate."""
     fy_start = date.year() if date.month() >= 4 else date.year() - 1
     fy_end = fy_start + 1
     fname = f"Purchase_{fy_start}-{fy_end}.xlsx"
     return os.path.join(PURCHASE_FILE_DIR, fname)
 
 
-def carry_forward_purchase_fy_stock(now_date: QDate, purchase_excel_path_func):
-    """
-    Carry forward all products with quantity > 0 from previous financial year's purchase file
-    into the new FY file as the opening stock in 'Invoices' sheet.
-    If new FY purchase file exists, append the carried stock (do not duplicate invoices).
-    Only runs on/after April (FY rollover).
-    """
+def carry_forward_purchase_fy_stock(now_date: QDate, purchase_excel_path_func) -> None:
+    """Carry forward stock from previous FY to new FY purchase file."""
     if now_date.month() < 4:
         # Do not run carry forward before April
         return
@@ -191,17 +240,22 @@ def carry_forward_purchase_fy_stock(now_date: QDate, purchase_excel_path_func):
         else:
             print(f"No new opening stock entries to add in {new_path}.")
             
-def get_product_category_from_db(product_name):
-    if not os.path.exists(SQLITE_DB_PATH_PURCHASE):
+def get_product_category_from_db(product_name: str) -> str:
+    """Look up the latest category for a product from the purchases table."""
+    db_path = DB_FILE  # unify to purchases.db
+    if not os.path.exists(db_path):
         return ""
     try:
-        conn = sqlite3.connect(SQLITE_DB_PATH_PURCHASE)
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("""
+        c.execute(
+            """
             SELECT category FROM purchases
-            WHERE product = ?
+            WHERE product_name = ?
             ORDER BY rowid DESC LIMIT 1
-        """, (product_name,))
+            """,
+            (product_name,)
+        )
         row = c.fetchone()
         conn.close()
         return row[0] if row else ""
@@ -210,6 +264,7 @@ def get_product_category_from_db(product_name):
 
 
 class PurchaseWidget(QWidget):
+    """Widget for purchase entry and inventory management."""
     def __init__(self, auth_manager=None, parent=None):
         super().__init__(parent)
         init_db()  # Ensure DB initialized
@@ -228,7 +283,8 @@ class PurchaseWidget(QWidget):
         self.build_ui()
         self.load_invoice_list()
 
-    def build_ui(self):
+    def build_ui(self) -> None:
+        """Build the UI components."""
         splitter = QSplitter(Qt.Horizontal)
         self.layout().addWidget(splitter)
 
@@ -272,7 +328,8 @@ class PurchaseWidget(QWidget):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 5)
 
-    def build_invoice_details_section(self, parent):
+    def build_invoice_details_section(self, parent) -> None:
+        """Build invoice details section."""
         invoice_group = QGroupBox("Invoice Details")
         parent.layout().addWidget(invoice_group)
         form = QFormLayout()
@@ -289,7 +346,8 @@ class PurchaseWidget(QWidget):
         self.vendor_name = QLineEdit()
         form.addRow(QLabel("Vendor Name:"), self.vendor_name)
 
-    def build_product_entry_section(self, parent):
+    def build_product_entry_section(self, parent) -> None:
+        """Build product entry section."""
         prod_group = QGroupBox("Add/Edit Product")
         parent.layout().addWidget(prod_group)
         layout = QHBoxLayout()
@@ -297,6 +355,15 @@ class PurchaseWidget(QWidget):
 
         self.product_name = QLineEdit()
         self.product_name.setPlaceholderText("Product Name")
+        # Attach completer with existing product names
+        try:
+            completer = QCompleter(self.get_distinct_product_names())
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            self.product_name.setCompleter(completer)
+        except Exception:
+            pass
+        # Auto-fill category on product commit
+        self.product_name.editingFinished.connect(self.autofill_category_for_product)
         layout.addWidget(QLabel("Product:"))
         layout.addWidget(self.product_name)
 
@@ -343,7 +410,8 @@ class PurchaseWidget(QWidget):
         self.btn_cancel_edit.setVisible(False)  # Only visible during product edit mode
         layout.addWidget(self.btn_cancel_edit)
 
-    def build_products_table_section(self, parent):
+    def build_products_table_section(self, parent) -> None:
+        """Build products table section."""
         table_group = QGroupBox("Products in Current Invoice")
         parent.layout().addWidget(table_group)
         self.product_table = QTableWidget(0, 7)
@@ -369,7 +437,8 @@ class PurchaseWidget(QWidget):
         btn_edit_product.clicked.connect(self.edit_selected_product)
         btn_layout.addWidget(btn_edit_product)
 
-    def build_save_controls_section(self, parent):
+    def build_save_controls_section(self, parent) -> None:
+        """Build save controls section."""
         btn_layout = QHBoxLayout()
         parent.layout().addLayout(btn_layout)
 
@@ -381,7 +450,8 @@ class PurchaseWidget(QWidget):
         self.btn_clear_all.clicked.connect(self.clear_all_fields)
         btn_layout.addWidget(self.btn_clear_all)
 
-    def ensure_excel_structure(self, path):
+    def ensure_excel_structure(self, path: str) -> None:
+        """Ensure Excel file exists with required sheets and headers."""
         os.makedirs(PURCHASE_FILE_DIR, exist_ok=True)
         if not os.path.exists(path):
             wb = Workbook()
@@ -398,7 +468,8 @@ class PurchaseWidget(QWidget):
             ])
             wb.save(path)
 
-    def load_invoice_list(self):
+    def load_invoice_list(self) -> None:
+        """Load invoice list from Excel and DB."""
         self.invoice_listwidget.clear()
         invoices = set()
         vendor_map = {}
@@ -436,13 +507,15 @@ class PurchaseWidget(QWidget):
             display_text = f"{inv} | {vendor_map.get(inv, '')}"
             self.invoice_listwidget.addItem(display_text)
 
-    def handle_search_invoices(self, text):
+    def handle_search_invoices(self, text: str) -> None:
+        """Handle invoice search input."""
         text = text.strip().lower()
         for i in range(self.invoice_listwidget.count()):
             item = self.invoice_listwidget.item(i)
             item.setHidden(text not in item.text().lower())
 
-    def load_selected_invoice(self):
+    def load_selected_invoice(self) -> None:
+        """Load selected invoice details."""
         selected_items = self.invoice_listwidget.selectedItems()
         if not selected_items:
             return
@@ -452,7 +525,8 @@ class PurchaseWidget(QWidget):
             return
         self.load_invoice(invoice_no)
 
-    def load_invoice(self, invoice_no):
+    def load_invoice(self, invoice_no: str) -> None:
+        """Load invoice details from DB or Excel."""
         # Try loading from SQLite first
         try:
             conn = sqlite3.connect(DB_FILE)
@@ -549,7 +623,8 @@ class PurchaseWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Load Error", f"Unable to load invoice: {str(e)}")
 
-    def handle_add_edit_product(self):
+    def handle_add_edit_product(self) -> None:
+        """Add or edit product entry in invoice."""
         pname = self.product_name.text().strip()
         qty = self.qty.text().strip()
         unit = self.unit.currentText()
@@ -590,13 +665,15 @@ class PurchaseWidget(QWidget):
                 self.set_product_entry_mode(add=True)
                 self.product_name.setFocus()
 
-    def refresh_product_table(self):
+    def refresh_product_table(self) -> None:
+        """Refresh products table display."""
         self.product_table.setRowCount(len(self.current_invoice_products))
         for row_idx, prod in enumerate(self.current_invoice_products):
             for col_idx, val in enumerate(prod):
                 self.product_table.setItem(row_idx, col_idx, QTableWidgetItem(str(val)))
 
-    def clear_product_entry_fields(self):
+    def clear_product_entry_fields(self) -> None:
+        """Clear product entry fields."""
         self.product_name.setText("")
         self.qty.setText("")
         self.mrp.setText("")
@@ -605,7 +682,8 @@ class PurchaseWidget(QWidget):
         self.expiry.setDate(self.expiry.minimumDate())
         self.category.setCurrentIndex(0)
 
-    def handle_remove_product(self):
+    def handle_remove_product(self) -> None:
+        """Remove selected product from invoice."""
         selected = self.product_table.selectionModel().selectedRows()
         if not selected:
             QMessageBox.information(self, "Remove Product", "Select a product row to remove.")
@@ -614,7 +692,8 @@ class PurchaseWidget(QWidget):
         self.current_invoice_products.pop(idx)
         self.refresh_product_table()
 
-    def edit_selected_product(self):
+    def edit_selected_product(self) -> None:
+        """Edit selected product in invoice."""
         selected = self.product_table.selectionModel().selectedRows()
         if not selected:
             QMessageBox.information(self, "Edit Product", "Select a product row to edit.")
@@ -644,7 +723,8 @@ class PurchaseWidget(QWidget):
         self.set_product_entry_mode(add=False)
         self.current_edit_product_row = idx
 
-    def set_product_entry_mode(self, add=True):
+    def set_product_entry_mode(self, add=True) -> None:
+        """Set product entry mode (add/edit)."""
         if add:
             self.btn_add_edit_product.setText("Add Product")
             self.btn_cancel_edit.setVisible(False)
@@ -653,7 +733,8 @@ class PurchaseWidget(QWidget):
             self.btn_add_edit_product.setText("Save Product")
             self.btn_cancel_edit.setVisible(True)
 
-    def setup_enter_key_navigation(self):
+    def setup_enter_key_navigation(self) -> None:
+        """Setup Enter key navigation for fields."""
         self.invoice_no.returnPressed.connect(self.date_edit.setFocus)
         self.vendor_name.returnPressed.connect(self.product_name.setFocus)
         self.product_name.returnPressed.connect(self.qty.setFocus)
@@ -666,6 +747,7 @@ class PurchaseWidget(QWidget):
         self.expiry.installEventFilter(self)
 
     def eventFilter(self, source, event):
+        """Handle Enter key navigation for widgets."""
         if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Return:
             if source == self.date_edit:
                 self.vendor_name.setFocus()
@@ -681,11 +763,66 @@ class PurchaseWidget(QWidget):
                 return True
         return super().eventFilter(source, event)
 
-    def cancel_product_edit(self):
+    def cancel_product_edit(self) -> None:
+        """Cancel product edit mode."""
         self.clear_product_entry_fields()
         self.set_product_entry_mode(add=True)
 
-    def validate_invoice_fields(self):
+    def get_distinct_product_names(self) -> list:
+        """Get distinct product names from DB."""
+        names = []
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT product_name FROM purchases ORDER BY product_name ASC")
+            names = [row[0] for row in cur.fetchall() if row and row[0]]
+            conn.close()
+        except Exception:
+            pass
+        return names
+
+    def normalize_category(self, category: str) -> str | None:
+        """Normalize category string to standard values."""
+        if not category:
+            return None
+        s = str(category).strip().lower()
+        if "seed" in s:
+            return "Seeds"
+        if "pesticid" in s:
+            return "Pesticide"
+        if "fertil" in s:
+            return "Fertilizer"
+        return None
+
+    def autofill_category_for_product(self) -> None:
+        """Autofill category field for product."""
+        pname = self.product_name.text().strip()
+        if not pname:
+            return
+        # Look up last category from DB
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT category FROM purchases WHERE product_name=? ORDER BY rowid DESC LIMIT 1",
+                (pname,)
+            )
+            row = cur.fetchone()
+            conn.close()
+            if row and row[0]:
+                cat = self.normalize_category(row[0])
+                if cat and cat in CATEGORY_OPTIONS:
+                    self.category.setCurrentText(cat)
+                    return
+        except Exception:
+            pass
+        # Heuristic fallback based on name
+        cat = self.normalize_category(pname)
+        if cat and cat in CATEGORY_OPTIONS:
+            self.category.setCurrentText(cat)
+
+    def validate_invoice_fields(self) -> bool:
+        """Validate invoice fields before saving."""
         inv_no = self.invoice_no.text().strip()
         vendor = self.vendor_name.text().strip()
         if not inv_no:
@@ -699,7 +836,8 @@ class PurchaseWidget(QWidget):
             return False
         return True
 
-    def handle_save_invoice(self):
+    def handle_save_invoice(self) -> None:
+        """Save invoice and update inventory."""
         if not self.validate_invoice_fields():
             return
 
@@ -717,8 +855,18 @@ class PurchaseWidget(QWidget):
             inv_ws = wb["Invoices"]
             vendor_ws = wb["VendorWise"]
 
-            # Delete existing invoice rows if editing
+            # Delete existing invoice rows if editing and adjust inventory
             if self.is_editing and self.current_invoice_no:
+                # Capture previous products to reverse inventory
+                try:
+                    conn_prev = sqlite3.connect(DB_FILE)
+                    cur_prev = conn_prev.cursor()
+                    cur_prev.execute("SELECT product_name, qty FROM purchases WHERE invoice_no=?", (self.current_invoice_no,))
+                    prev_products = cur_prev.fetchall()
+                    conn_prev.close()
+                except Exception:
+                    prev_products = []
+
                 rows_to_delete = [row[0].row for row in inv_ws.iter_rows(min_row=2) if row[0].value == self.current_invoice_no]
                 for r in reversed(rows_to_delete):
                     inv_ws.delete_rows(r)
@@ -729,6 +877,13 @@ class PurchaseWidget(QWidget):
 
                 # Delete from DB as well
                 delete_invoice_from_db(self.current_invoice_no)
+
+                # Adjust inventory by subtracting previous quantities
+                for pname, qty_prev in prev_products:
+                    try:
+                        inventory_subtract(pname, float(qty_prev or 0))
+                    except Exception:
+                        pass
 
             # Append current invoice products to Excel and DB
             for prod in self.current_invoice_products:
@@ -757,6 +912,14 @@ class PurchaseWidget(QWidget):
 
             wb.save(self.excel_path)
 
+            # Update inventory for new products
+            try:
+                for prod in self.current_invoice_products:
+                    pname, qty, unit, mrp, gst, expiry, category = prod
+                    inventory_add(pname, float(qty or 0))
+            except Exception as e:
+                print(f"WARNING: Failed to update inventory: {e}")
+
             QMessageBox.information(self, "Saved", f"Invoice '{inv_no}' saved successfully.")
 
             self.current_invoice_no = inv_no
@@ -766,10 +929,8 @@ class PurchaseWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save invoice:\n{str(e)}")
 
-    def clear_all_fields(self):
-        """
-        Reset all invoice fields and clear the product list for a new invoice entry.
-        """
+    def clear_all_fields(self) -> None:
+        """Reset all invoice fields and clear the product list."""
         self.invoice_no.setText("")
         self.vendor_name.setText("")
         self.date_edit.setDate(QDate.currentDate())
@@ -781,7 +942,8 @@ class PurchaseWidget(QWidget):
         self.is_editing = False
         self.current_invoice_no = None
 
-    def handle_delete_invoice(self):
+    def handle_delete_invoice(self) -> None:
+        """Delete selected invoice and adjust inventory."""
         if not self.auth_manager or not self.auth_manager.has_role("admin"):
            QMessageBox.warning(self, "Access Denied", "Only admin users can delete invoices.")
            return
@@ -806,6 +968,16 @@ class PurchaseWidget(QWidget):
         )
         if reply == QMessageBox.Yes:
             try:
+               # Capture products to adjust inventory
+               try:
+                   conn_prev = sqlite3.connect(DB_FILE)
+                   cursor_prev = conn_prev.cursor()
+                   cursor_prev.execute("SELECT product_name, qty FROM purchases WHERE invoice_no=?", (invoice_no,))
+                   prev_products = cursor_prev.fetchall()
+                   conn_prev.close()
+               except Exception:
+                   prev_products = []
+
                # Delete from Excel
                if os.path.exists(self.excel_path):
                    wb = load_workbook(self.excel_path)
@@ -824,8 +996,15 @@ class PurchaseWidget(QWidget):
 
                    wb.save(self.excel_path)
 
-                 # Delete from SQLite DB
+               # Delete from SQLite DB
                delete_invoice_from_db(invoice_no)
+
+               # Adjust inventory by subtracting deleted invoice quantities
+               for pname, qty_prev in prev_products:
+                   try:
+                       inventory_subtract(pname, float(qty_prev or 0))
+                   except Exception:
+                       pass
 
                QMessageBox.information(self, "Deleted", f"Invoice '{invoice_no}' deleted successfully.")
                self.load_invoice_list()
