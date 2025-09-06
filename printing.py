@@ -1,12 +1,80 @@
-import sys
+import sys, os
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QLabel, QDialog, QApplication, QMessageBox
 )
-from PyQt5.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
-from PyQt5.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
+from PyQt5.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
 from PyQt5.QtGui import QTextCursor, QFont, QFontMetrics
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSizeF
+from datetime import datetime
+
+# Optional Windows raw printing via pywin32
+try:
+    import win32print, win32ui, win32con
+    HAS_WIN32 = True
+except Exception:
+    HAS_WIN32 = False
+
+def _select_native_printer(printer: QPrinter) -> bool:
+    """
+    Try to bind QPrinter to a native installed printer.
+    Returns True if a native printer was selected, else False.
+    """
+    try:
+        printers = QPrinterInfo.availablePrinters()
+        if not printers:
+            return False
+        # Prefer system default, else pick first available
+        default_info = QPrinterInfo.defaultPrinter()
+        chosen = default_info if default_info and not default_info.isNull() else printers[0]
+        printer.setOutputFormat(QPrinter.NativeFormat)
+        printer.setPrinterName(chosen.printerName())
+        return True
+    except Exception:
+        return False
+
+# Direct Windows raw printing using GDI (pywin32)
+# Mirrors the settings you provided (Courier New, MM_TWIPS, line spacing).
+
+def print_bill_win32(bill_text: str):
+    if not HAS_WIN32:
+        raise RuntimeError("pywin32 not available")
+    printer_name = win32print.GetDefaultPrinter()
+    if not printer_name:
+        raise RuntimeError("No default printer configured")
+
+    hPrinter = win32print.OpenPrinter(printer_name)
+    try:
+        win32print.StartDocPrinter(hPrinter, 1, ("Your company Bill", None, "RAW"))
+        win32print.StartPagePrinter(hPrinter)
+
+        hDC = win32ui.CreateDC()
+        hDC.CreatePrinterDC(printer_name)
+
+        hDC.SetMapMode(win32con.MM_TWIPS)
+        hDC.StartDoc("Your company Bill")
+        hDC.StartPage()
+
+        font = win32ui.CreateFont({
+            "name": "Courier New",
+            "height": -150,  # ~10.5pt
+            "weight": 500
+        })
+        hDC.SelectObject(font)
+        x = 100
+        y = -100
+        for line in bill_text.split("\n"):
+            hDC.TextOut(x, y, line)
+            y -= 200  # line spacing
+
+        hDC.EndPage()
+        hDC.EndDoc()
+        hDC.DeleteDC()
+
+        win32print.EndPagePrinter(hPrinter)
+        win32print.EndDocPrinter(hPrinter)
+    finally:
+        win32print.ClosePrinter(hPrinter)
 
 class PrintPreviewDialog(QDialog):
     """
@@ -39,16 +107,50 @@ class PrintPreviewDialog(QDialog):
         layout.addLayout(btn_row)
 
     def handle_print(self):
+        # Try Windows raw printing first (no dialog), matching your settings
+        if 'HAS_WIN32' in globals() and HAS_WIN32:
+            try:
+                print_bill_win32(self.text_edit.toPlainText())
+                QMessageBox.information(self, "Printed", "Sent to printer.")
+                return
+            except Exception:
+                # Fall through to Qt printing
+                pass
         printer = QPrinter(QPrinter.HighResolution)
-        printer.setPageSize(QPrinter.Custom)
-        # 58mm width: about 165 pixels at 200dpi; set page size accordingly
-        printer.setPaperSize(QPrinter.Inch)
+        # Configure paper size for 58mm thermal
+        try:
+            printer.setPageSize(QPrinter.Custom)
+            printer.setPaperSize(QSizeF(58, 200), QPrinter.Millimeter)
+        except Exception:
+            printer.setPageSize(QPrinter.A6)
         printer.setPageMargins(2, 2, 2, 2, QPrinter.Millimeter)
-        printer.setPrinterName("")  # Default printer
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec_() == QPrintDialog.Accepted:
-            self.text_edit.print_(printer)
-            QMessageBox.information(self, "Printed", "Sent to printer.")
+
+        # Try native print dialog by binding to an installed printer; fallback to PDF if none
+        try:
+            if _select_native_printer(printer):
+                dialog = QPrintDialog(printer, self)
+                if dialog.exec_() == QPrintDialog.Accepted:
+                    self.text_edit.print_(printer)
+                    QMessageBox.information(self, "Printed", "Sent to printer.")
+                    return
+                else:
+                    # User canceled dialog; stop silently
+                    return
+            # No native printers available -> PDF fallback
+            raise RuntimeError("No native printer available")
+        except Exception:
+            # Save as PDF in data/prints
+            try:
+                out_dir = os.path.join("data", "prints")
+                os.makedirs(out_dir, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                out_path = os.path.join(out_dir, f"receipt_{ts}.pdf")
+                printer.setOutputFormat(QPrinter.PdfFormat)
+                printer.setOutputFileName(out_path)
+                self.text_edit.print_(printer)
+                QMessageBox.information(self, "Saved PDF", f"No native printer. Receipt saved to:\n{out_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Print Error", f"Unable to print or save PDF.\n{e}")
 
 def pretty_bill_text(shop_name, shop_phone, bill_no, date, customer, mobile, products, subtotal, discount, gst_total, total):
     """
@@ -100,7 +202,7 @@ if __name__ == "__main__":
         {"Product Name": "Seed Pack", "Quantity": 1, "Sale Price": 120.00},
     ]
     show_bill_print_preview(
-        shop_name="Sri Krishna Agro Centre",
+        shop_name="Gokulan's Pharma",
         shop_phone="6383958656",
         bill_no=41,
         date="22-07-2025",
