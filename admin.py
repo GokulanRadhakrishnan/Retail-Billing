@@ -13,6 +13,7 @@ DATA_DIR = "data"
 USER_FILE = "users.json"
 
 class AdminWidget(QWidget):
+    """Admin widget for user management, backup, and logs."""
     def __init__(self, auth_manager, parent=None):
         super().__init__(parent)
         self.auth_manager = auth_manager
@@ -22,7 +23,8 @@ class AdminWidget(QWidget):
         self.refresh_user_list()
         self.update_user_status()
 
-    def build_ui(self):
+    def build_ui(self) -> None:
+        """Build the UI components."""
         # Login status
         status_layout = QHBoxLayout()
         self.lbl_user = QLabel()
@@ -104,12 +106,14 @@ class AdminWidget(QWidget):
         backup_layout.addWidget(btn_restore)
         self.layout().addWidget(backup_group)
 
-    def update_user_status(self):
+    def update_user_status(self) -> None:
+        """Update user status label."""
         user = self.auth_manager.get_current_user()
         roles = self.auth_manager.get_user_roles(user) if user else []
         self.lbl_user.setText(f"Logged in as: {user} ({', '.join(roles)})")
 
-    def refresh_user_list(self):
+    def refresh_user_list(self) -> None:
+        """Refresh user list combo box."""
         self.user_combo.blockSignals(True)
         self.user_combo.clear()
         all_users = sorted(self.auth_manager.users.keys())
@@ -117,7 +121,8 @@ class AdminWidget(QWidget):
         self.user_combo.blockSignals(False)
         self.handle_user_selected()
 
-    def handle_user_selected(self):
+    def handle_user_selected(self) -> None:
+        """Handle user selection change."""
         username = self.user_combo.currentText()
         if not username:
             self.role_label.setText("Role:")
@@ -126,7 +131,8 @@ class AdminWidget(QWidget):
         self.role_label.setText(f"Role: {', '.join(roles) if roles else 'staff'}")
         self.pw_update_input.clear()  # Clear password input on user change
 
-    def create_user(self):
+    def create_user(self) -> None:
+        """Create a new user."""
         username = self.new_user_input.text().strip()
         password = self.pw_input.text().strip()
         if not username or not password:
@@ -145,7 +151,8 @@ class AdminWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
 
-    def update_user_pw(self):
+    def update_user_pw(self) -> None:
+        """Update password for selected user."""
         username = self.user_combo.currentText().strip()
         password = self.pw_update_input.text().strip()
         if not username or not password:
@@ -162,7 +169,8 @@ class AdminWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
 
-    def delete_user(self):
+    def delete_user(self) -> None:
+        """Delete selected user."""
         username = self.user_combo.currentText()
         if username == "admin":
             QMessageBox.warning(self, "Denied", "Cannot delete default admin user.")
@@ -178,7 +186,8 @@ class AdminWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
 
-    def refresh_staff_log(self):
+    def refresh_staff_log(self) -> None:
+        """Refresh staff activity log table."""
         # Aggregates entries/actions from purchase/sales Excel showing staff activity.
         self.log_table.setRowCount(0)
         for fname in os.listdir(DATA_DIR):
@@ -210,72 +219,98 @@ class AdminWidget(QWidget):
                 # Silently skip problematic files (optional: add logging)
                 continue
 
-    def handle_backup(self):
+    def handle_backup(self) -> None:
+        """Handle backup of data files."""
         backup_root_dir = QFileDialog.getExistingDirectory(self, "Select Backup Directory")
         if not backup_root_dir:
-          return
+            return
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_subdir = os.path.join(backup_root_dir, f"backup_{timestamp}")
         os.makedirs(backup_subdir, exist_ok=True)
 
         try:
-            # Files to backup (Excel + user JSON)
-            files_to_backup = [f for f in os.listdir(DATA_DIR) if f.endswith(".xlsx")]
-            if os.path.exists(USER_FILE):
-               files_to_backup.append(USER_FILE)
+            # Build list of files to back up with explicit source and archive names
+            files = []  # list of tuples (src_path, arcname)
 
-            # Copy files to backup_subdir
-            for fname in files_to_backup:
-                src = os.path.join(DATA_DIR, fname) if fname != USER_FILE else USER_FILE
-                dst = os.path.join(backup_subdir, fname)
+            # Excel files in data directory
+            for fname in os.listdir(DATA_DIR):
+                if fname.lower().endswith(".xlsx"):
+                    files.append((os.path.join(DATA_DIR, fname), fname))
+
+            # users.json at project root
+            if os.path.exists(USER_FILE):
+                files.append((USER_FILE, os.path.basename(USER_FILE)))
+
+            # SQLite databases
+            if os.path.exists("purchases.db"):
+                files.append(("purchases.db", "purchases.db"))
+            sales_db_path = os.path.join(DATA_DIR, "sales_data.db")
+            if os.path.exists(sales_db_path):
+                files.append((sales_db_path, "sales_data.db"))
+
+            # Copy to backup_subdir using arcnames
+            for src, arcname in files:
+                dst = os.path.join(backup_subdir, arcname)
                 shutil.copy2(src, dst)
 
-            # Create a zip archive of backup_subdir
+            # Zip the backup_subdir
             zip_path = os.path.join(backup_root_dir, f"backup_{timestamp}.zip")
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for fname in files_to_backup:
-                    full_path = os.path.join(backup_subdir, fname)
-                    zipf.write(full_path, arcname=fname)
+                for _, arcname in files:
+                    full_path = os.path.join(backup_subdir, arcname)
+                    zipf.write(full_path, arcname=arcname)
 
             QMessageBox.information(
                 self,
                 "Backup Complete",
-                f"Backup saved to:\n{backup_subdir}\n\n"
-                f"Compressed as:\n{zip_path}"
+                f"Backup saved to:\n{backup_subdir}\n\nCompressed as:\n{zip_path}"
             )
 
         except Exception as e:
             QMessageBox.critical(self, "Backup Failed", f"Backup failed:\n{e}")
 
-    def handle_restore(self):
+    def handle_restore(self) -> None:
+        """Handle restore from backup files."""
         # Let user pick a zip backup file or an Excel file for restore
         file_filter = "Backup Files (*.zip *.xlsx)"
         restore_path, _ = QFileDialog.getOpenFileName(self, "Select Backup to Restore", "", file_filter)
         if not restore_path:
-           return
+            return
 
         try:
             # If zip file, unzip contents to a temp folder and restore files
             if restore_path.lower().endswith(".zip"):
-               import tempfile
-               with tempfile.TemporaryDirectory() as tempdir:
-                  with zipfile.ZipFile(restore_path, 'r') as zf:
-                     zf.extractall(tempdir)
+                import tempfile
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with zipfile.ZipFile(restore_path, 'r') as zf:
+                        zf.extractall(tempdir)
 
-                  # Copy extracted files to DATA_DIR and overwrite
-                  for fname in os.listdir(tempdir):
-                      src = os.path.join(tempdir, fname)
-                      dst = os.path.join(DATA_DIR, fname)
-                      confirm = QMessageBox.question(
-                          self,
-                          "Confirm Restore",
-                          f"Restore file '{fname}' and overwrite existing data if it exists?",
-                          QMessageBox.Yes | QMessageBox.No,
-                          QMessageBox.No
-                       )
-                      if confirm == QMessageBox.Yes:
-                           shutil.copy2(src, dst)
+                    # Restore extracted files to their appropriate locations
+                    for fname in os.listdir(tempdir):
+                        src = os.path.join(tempdir, fname)
+                        # Decide destination based on filename
+                        if fname.lower().endswith('.xlsx'):
+                            dst = os.path.join(DATA_DIR, fname)
+                        elif fname == os.path.basename(USER_FILE) or fname == "purchases.db":
+                            dst = fname  # project root
+                        elif fname == "sales_data.db":
+                            dst = os.path.join(DATA_DIR, "sales_data.db")
+                        else:
+                            # Skip unknown files
+                            continue
+
+                        confirm = QMessageBox.question(
+                            self,
+                            "Confirm Restore",
+                            f"Restore file '{fname}' and overwrite existing data if it exists?",
+                            QMessageBox.Yes | QMessageBox.No,
+                            QMessageBox.No
+                        )
+                        if confirm == QMessageBox.Yes:
+                            # Ensure directory exists for DATA_DIR destinations
+                            os.makedirs(os.path.dirname(dst) or '.', exist_ok=True)
+                            shutil.copy2(src, dst)
 
             elif restore_path.lower().endswith(".xlsx"):
                 # Single Excel file restore
@@ -289,7 +324,7 @@ class AdminWidget(QWidget):
                     QMessageBox.No
                 )
                 if confirm == QMessageBox.Yes:
-                   shutil.copy2(restore_path, dst)
+                    shutil.copy2(restore_path, dst)
             else:
                 QMessageBox.warning(self, "Invalid File", "Please select a valid backup (.zip) or Excel (.xlsx) file.")
                 return
@@ -297,9 +332,10 @@ class AdminWidget(QWidget):
             QMessageBox.information(self, "Restore Complete", "Data restore completed successfully.")
 
         except Exception as e:
-             QMessageBox.critical(self, "Restore Failed", f"Restore failed:\n{e}")
+            QMessageBox.critical(self, "Restore Failed", f"Restore failed:\n{e}")
 
-    def handle_logout(self):
+    def handle_logout(self) -> None:
+        """Logout current user."""
         self.auth_manager.logout()
         QMessageBox.information(self, "Logged Out", "You have been logged out.")
         self.update_user_status()
